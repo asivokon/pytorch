@@ -59,15 +59,6 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ") to a builtin operator");
 }
 
-void finishAcceptUserRRef(
-    const rpc::Message& message,
-    const c10::optional<utils::FutureError>& futErr) {
-  RRefContext::handleException(futErr);
-  auto rr = RemoteRet::fromMessage(message);
-  auto& ctx = RRefContext::getInstance();
-  ctx.delPendingUser(rr->forkId());
-}
-
 void finishCreatingOwnerRRef(
     const Message& message,
     const c10::optional<utils::FutureError>& futErr) {
@@ -174,7 +165,7 @@ PyRRef pyRemoteBuiltin(
       agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
 
   ctx.addPendingUser(userRRef->forkId(), userRRef);
-  fm->addCallback(finishAcceptUserRRef);
+  fm->addCallback(callback::confirmPendingUser);
   return PyRRef(userRRef);
 }
 
@@ -215,7 +206,7 @@ PyRRef pyRemotePythonUdf(
         userRRef->forkId().toIValue(),
         rf);
 
-    fm->addCallback(finishAcceptUserRRef);
+    fm->addCallback(callback::confirmPendingUser);
     return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef<py::object>();

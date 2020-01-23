@@ -11,7 +11,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscriptCall(
+c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     const std::string& dst,
     const c10::QualifiedName& qualifiedName,
     std::vector<c10::IValue>& stack) {
@@ -48,6 +48,33 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscriptCall(
     }
   });
   return futPtr;
+}
+
+std::shared_ptr<UserRRef<IValue>> remoteTorchscript(
+    const WorkerInfo& dst,
+    const c10::QualifiedName& qualifiedName,
+    std::vector<c10::IValue>& stack) {
+  auto& ctx = RRefContext::getInstance();
+  // TODO: support creating RRefs on a local object.
+  TORCH_INTERNAL_ASSERT(
+      ctx.getWorkerId() != dst.id_,
+      "Does not support creating RRef on self yet.");
+  auto userRRefPtr = ctx.createUserRRef<IValue>(dst.id_);
+
+  auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
+      qualifiedName,
+      std::move(stack),
+      userRRefPtr->rrefId(),
+      userRRefPtr->forkId());
+
+  auto agent = RpcAgent::getDefaultRpcAgent();
+  auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+      *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, nullptr);
+
+  ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
+  fm->addCallback(callback::confirmPendingUser);
+
+  return userRRefPtr;
 }
 
 } // namespace rpc
